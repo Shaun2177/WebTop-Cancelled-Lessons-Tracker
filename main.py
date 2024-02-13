@@ -7,75 +7,55 @@ import urllib3
 
 urllib3.disable_warnings()
 
-# Load the subjects from the JSON file
-with open('subjects.json', 'r', encoding='utf-8') as f:
-    subjects = json.load(f)
+def load_json(filename):
+	with open(filename, 'r', encoding='utf-8') as f:
+		return json.load(f)
 
-# Load the rooms from the JSON file
-with open('rooms.json', 'r', encoding='utf-8') as f:
-	rooms = json.load(f)
+def load_env_vars():
+	load_dotenv()
+	return os.getenv("URL"), os.getenv("COOKIE")
 
-# Get the current day as an integer (Sunday = 0)
-current_day = datetime.now().isoweekday()
+def main():
+	subjects = load_json('subjects.json')
+	rooms = load_json('rooms.json')
+	URL, COOKIE = load_env_vars()
 
-# Load environment variables and dotenv
-load_dotenv()
+	current_day = datetime.now().isoweekday()
 
-URL = os.getenv("URL")
-COOKIE = os.getenv("COOKIE")
+	headers = {
+		"accept": "application/json, text/plain, */*",
+		"accept-language": "en-US,en;q=0.9,he-IL;q=0.8,he;q=0.7",
+		"cookie": COOKIE
+	}
+	data = {
+		"institutionCode": 515502,
+		"selectedValue": "10|1",
+		"typeView": 2
+	}
 
-headers = {
-	"accept": "application/json, text/plain, */*",
-	"accept-language": "en-US,en;q=0.9,he-IL;q=0.8,he;q=0.7",
-	"content-type": "application/json",
-	"cookie": COOKIE
-}
-data = {
-	"institutionCode": 515502,
-	"selectedValue": "10|1",
-	"typeView": 2
-}
+	with requests.Session() as session:
+		response = session.post(URL, headers=headers, json=data, verify=False)
+		json_data = response.json()
 
-# Send POST request to get the schedule
-response = requests.post(URL, headers=headers, data=json.dumps(data), verify=False)
-json_data = response.json()
+		if 'data' in json_data and isinstance(json_data['data'], list):
+			day = json_data['data'][current_day]
 
-# If data (days) exists and is a list
-if 'data' in json_data and isinstance(json_data['data'], list):
+			if day.get("dayIndex") <= 5:
+				for hour in day.get("hoursData"):
+					if 1 <= hour.get("hour") <= 10 and 'scheduale' in hour and len(hour['scheduale']) > 0:
+						lesson = hour['scheduale'][0]
+						lessonName = lesson.get("subject")
+						lessonID = str(lesson.get("studyGroupID"))
+						roomID = str(lesson.get("roomID"))
 
-	days = json_data['data']
-	day = days[current_day]
+						if lessonID not in subjects or roomID not in rooms:
+							continue
 
-	# If day is Sunday to Thursday
-	if day.get("dayIndex") <= 5:
-
-		# Iterate over the hours
-		for hour in day.get("hoursData"):	
-
-			# If hour of lesson is 1 to 10
-			if hour.get("hour") >= 1 and hour.get("hour") <= 10:
-
-				if hour.get("scheduale"):
-					
-					lesson = hour.get("scheduale")[0]
-					lessonName = lesson.get("subject")
-					lessonID = str(lesson.get("studyGroupID"))
-
-					roomID = str(lesson.get("roomID"))
-
-					# If not a valid lesson
-					if lessonID not in subjects:
-						continue
-
-					if roomID not in rooms:
-						continue
-
-					# If there's changes to the lesson
-					changes = lesson.get("changes")
-					if changes:
-						changes = changes[0]
-						if changes.get("isClassCancel") is True:
+						changes = lesson.get("changes")
+						if changes and changes[0].get("isClassCancel"):
 							print(f"{lessonName} is cancelled")
-						
-else:
-	print("'data' field is missing or is not a list")
+		else:
+			print("'data' field is missing or is not a list")
+
+if __name__ == "__main__":
+	main()
